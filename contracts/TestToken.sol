@@ -13,9 +13,9 @@ contract TestToken {
     /*
      *  Constants
      */
-    string constant public name = "Test Token";
-    string constant public symbol = "TT";
-    uint8 constant public decimals = 1;
+    string constant public name = "Remme testnet token";
+    string constant public symbol = "REM";
+    uint8 constant public decimals = 4;
 
     /*
      *  Storage
