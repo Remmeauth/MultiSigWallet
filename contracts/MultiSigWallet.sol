@@ -27,7 +27,6 @@ contract MultiSigWallet {
      *  Storage
      */
     mapping (uint => Transaction) public transactions;
-    mapping (bytes32 => uint) public swapTransactions;
     mapping (uint => mapping (address => bool)) public confirmations;
     mapping (address => bool) public isOwner;
     address[] public owners;
@@ -39,6 +38,7 @@ contract MultiSigWallet {
         uint value;
         bytes data;
         bool executed;
+        bytes32 swapId;
     }
 
     /*
@@ -201,15 +201,20 @@ contract MultiSigWallet {
     /// @param nonce Transaction counter in Remchain.
     /// @param data Transaction data payload.
     /// @return Returns transaction ID.
-    function submitAndConfirmSwapTransaction(address destination, uint value, uint nonce, bytes data)
+    function processSwapTransaction(address destination, uint value, uint nonce, bytes data)
         public
         returns (uint transactionId)
     {
         bytes32 swapId = sha256("eth", "*", destination, "*", value, "*", nonce, "*", data);
-        transactionId = swapTransactions[swapId];
+        transactionId = 0;
+        for (uint i=0; i<transactionCount; i++)
+            if (transactions[i].swapId == swapId) {
+                transactionId = i;
+                break;
+            }
         if (transactionId == 0 || transactionCount == 0) {
             transactionId = addTransaction(destination, value, data);
-            swapTransactions[swapId] = transactionId;
+            transactions[transactionId].swapId = swapId;
         }
         confirmTransaction(transactionId);
     }
@@ -316,7 +321,8 @@ contract MultiSigWallet {
             destination: destination,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            swapId: bytes32(0)
         });
         transactionCount += 1;
         Submission(transactionId);
