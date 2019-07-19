@@ -33,13 +33,14 @@ contract MultiSigWallet {
     mapping (address => bool) public isOwner;
     address[] public owners;
     uint public required;
-    uint public transactionCount;
+    uint public transactionCount = 0;
 
     struct Transaction {
         address destination;
         uint value;
         bytes data;
         bool executed;
+        bytes32 swapId;
     }
 
     /*
@@ -209,6 +210,30 @@ contract MultiSigWallet {
         confirmTransaction(transactionId);
     }
 
+    /// @dev Allows an owner to submit and confirm a swap transaction from Remchain to ERC20 REM.
+    /// @param destination Transaction target address.
+    /// @param value Transaction ether value.
+    /// @param nonce Transaction counter in Remchain.
+    /// @param data Transaction data payload.
+    /// @return Returns transaction ID.
+    function processSwapTransaction(address destination, uint value, uint nonce, bytes data)
+        public
+        returns (uint transactionId)
+    {
+        bytes32 swapId = sha256("eth", "*", destination, "*", value, "*", nonce, "*", data);
+        transactionId = 0;
+        for (uint i=0; i<transactionCount; i++)
+            if (transactions[i].swapId == swapId) {
+                transactionId = i;
+                break;
+            }
+        if (transactionId == 0 || transactionCount == 0) {
+            transactionId = addTransaction(destination, value, data);
+            transactions[transactionId].swapId = swapId;
+        }
+        confirmTransaction(transactionId);
+    }
+
     /// @dev Allows an owner to confirm a transaction.
     /// @param transactionId Transaction ID.
     function confirmTransaction(uint transactionId)
@@ -311,7 +336,8 @@ contract MultiSigWallet {
             destination: destination,
             value: value,
             data: data,
-            executed: false
+            executed: false,
+            swapId: bytes32(0)
         });
         transactionCount += 1;
         Submission(transactionId);
