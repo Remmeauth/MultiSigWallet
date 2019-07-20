@@ -222,11 +222,14 @@ contract MultiSigWallet {
     {
         bytes32 swapId = sha256("eth", "*", destination, "*", value, "*", nonce, "*", data);
         transactionId = 0;
-        for (uint i=0; i<transactionCount; i++)
+        for (uint i=transactionCount-1; i>=0; i--) {
+            if (transactions[i].executed)
+                break;
             if (transactions[i].swapId == swapId) {
                 transactionId = i;
                 break;
             }
+        }
         if (transactionId == 0 || transactionCount == 0) {
             transactionId = addTransaction(destination, value, data);
             transactions[transactionId].swapId = swapId;
