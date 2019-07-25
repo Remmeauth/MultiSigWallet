@@ -17,13 +17,20 @@ contract MultiSigWallet {
     event OwnerAddition(address indexed owner);
     event OwnerRemoval(address indexed owner);
     event RequirementChange(uint required);
-    event SwapRequest(address sender, string chainId, string userPublicKey, uint amountToSwap, uint timestamp);
+    event SwapRequest( address sender,
+                       bytes32 chainId,
+                       string swapPubkey,
+                       uint amountToSwap,
+                       uint timestamp);
 
     /*
      *  Constants
      */
     uint constant public MAX_OWNER_COUNT = 50;
-    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0x83984d6142934bb535793A82ADB0a46EF0F66B6d);  // Remme ERC20 contract address
+    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0xdDB7456b6d76b6F17080439c98BB8Dad8B5Bae98);  // Remme ERC20 contract address
+    bytes32 constant public REMCHAIN_ID = 0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32;
+    uint constant public REMCHAIN_PUBKEY_LENGTH = 53;
+    uint constant public MIN_SWAP_AMOUNT = 200000;  // in REM
 
     /*
      *  Storage
@@ -93,6 +100,22 @@ contract MultiSigWallet {
             && ownerCount != 0);
         _;
     }
+
+    modifier validAmountToSwap(uint amountToSwap) {
+        require(amountToSwap >= MIN_SWAP_AMOUNT);
+        _;
+    }
+
+    modifier validChainId(bytes32 chainId) {
+        require(chainId == REMCHAIN_ID);
+        _;
+    }
+
+    modifier validPubkey(string pubkey) {
+        require(bytes(pubkey).length == REMCHAIN_PUBKEY_LENGTH);
+        _;
+    }
+
 
     /// @dev Fallback function allows to deposit ether.
     function()
@@ -186,15 +209,18 @@ contract MultiSigWallet {
 
     /// @dev Allows a user to request swap from ERC20 REM to Remchain.
     /// @param chainId Destination blockchain identifier on which swapped tokens should be  sent.
-    /// @param userPublicKey Public key which is used to validate signature for claiming account name on Remchain.
+    /// @param swapPubkey Public key which is used to validate signature for claiming account name on Remchain.
     /// @param amountToSwap Amount of tokens to swap from ERC20 REM to Remchain.
-    function requestSwap(string chainId, string userPublicKey, uint amountToSwap)
+    function requestSwap(bytes32 chainId, string swapPubkey, uint amountToSwap)
         public
+        validAmountToSwap(amountToSwap)
+        validChainId(chainId)
+        validPubkey(swapPubkey)
     {
         if (!ERC20_REM_CONTRACT.transferFrom(msg.sender, address(this), amountToSwap)) {
             revert();
         }
-        SwapRequest(msg.sender, chainId, userPublicKey, amountToSwap, now);
+        SwapRequest(msg.sender, chainId, swapPubkey, amountToSwap, now);
     }
 
     /// @dev Allows an owner to submit and confirm a transaction.
