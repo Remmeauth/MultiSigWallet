@@ -17,6 +17,7 @@ contract MultiSigWallet {
     event OwnerAddition(address indexed owner);
     event OwnerRemoval(address indexed owner);
     event RequirementChange(uint required);
+    event SwapAmountChange(uint min_swap_amount);
     event SwapRequest( address sender,
                        bytes32 chainId,
                        string swapPubkey,
@@ -29,13 +30,15 @@ contract MultiSigWallet {
     uint constant public MAX_OWNER_COUNT = 50;
     ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0xdDB7456b6d76b6F17080439c98BB8Dad8B5Bae98);  // Remme ERC20 contract address
     bytes32 constant public REMCHAIN_ID = 0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32;
-    uint constant public REMCHAIN_PUBKEY_LENGTH = 53;
-    uint constant public MIN_SWAP_AMOUNT = 200000;  // in REM
+    bytes32 constant public ETH_ID =      0x0000000000000000000000000000000000000000000000000000000000000001;
+    uint constant public REMCHAIN_PUBKEY_LENGTH = 50;
 
     /*
      *  Storage
      */
+    uint public min_swap_amount = 200000;  // in REM
     mapping (uint => Transaction) public transactions;
+    mapping (bytes32 => uint) public swapTransactions;  // returns transaction number starting from 1
     mapping (uint => mapping (address => bool)) public confirmations;
     mapping (address => bool) public isOwner;
     address[] public owners;
@@ -47,7 +50,6 @@ contract MultiSigWallet {
         uint value;
         bytes data;
         bool executed;
-        bytes32 swapId;
     }
 
     /*
@@ -102,7 +104,7 @@ contract MultiSigWallet {
     }
 
     modifier validAmountToSwap(uint amountToSwap) {
-        require(amountToSwap >= MIN_SWAP_AMOUNT);
+        require(amountToSwap >= min_swap_amount);
         _;
     }
 
@@ -207,6 +209,16 @@ contract MultiSigWallet {
         RequirementChange(_required);
     }
 
+    /// @dev Allows to change minimum swap amount. Transaction has to be sent by wallet.
+    /// @param _min_swap_amount minimum amount to swap.
+    function changeMinimumSwapAmount(uint _min_swap_amount)
+        public
+        onlyWallet
+    {
+        min_swap_amount = _min_swap_amount;
+        SwapAmountChange(_min_swap_amount);
+    }
+
     /// @dev Allows a user to request swap from ERC20 REM to Remchain.
     /// @param chainId Destination blockchain identifier on which swapped tokens should be  sent.
     /// @param swapPubkey Public key which is used to validate signature for claiming account name on Remchain.
@@ -246,21 +258,13 @@ contract MultiSigWallet {
         public
         returns (uint transactionId)
     {
-        bytes32 swapId = sha256("eth", "*", destination, "*", value, "*", nonce, "*", data);
-        transactionId = 0;
-        for (uint i=transactionCount-1; i>=0; i--) {
-            if (transactions[i].executed)
-                break;
-            if (transactions[i].swapId == swapId) {
-                transactionId = i;
-                break;
-            }
-        }
-        if (transactionId == 0 || transactionCount == 0) {
+        bytes32 swapId = keccak256(ETH_ID, "*", destination, "*", value, "*", nonce, "*", data);
+        transactionId = swapTransactions[swapId];
+        if ( transactionId == 0 ) {
             transactionId = addTransaction(destination, value, data);
-            transactions[transactionId].swapId = swapId;
+            swapTransactions[swapId] = transactionId+1;
         }
-        confirmTransaction(transactionId);
+        confirmTransaction(swapTransactions[swapId]-1);
     }
 
     /// @dev Allows an owner to confirm a transaction.
@@ -365,8 +369,7 @@ contract MultiSigWallet {
             destination: destination,
             value: value,
             data: data,
-            executed: false,
-            swapId: bytes32(0)
+            executed: false
         });
         transactionCount += 1;
         Submission(transactionId);
