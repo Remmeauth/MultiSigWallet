@@ -31,7 +31,7 @@ contract MultiSigWallet {
     ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0xdDB7456b6d76b6F17080439c98BB8Dad8B5Bae98);  // Remme ERC20 contract address
     bytes32 constant public REMCHAIN_ID = 0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32;
     bytes32 constant public ETH_ID =      0x0000000000000000000000000000000000000000000000000000000000000001;
-    uint constant public REMCHAIN_PUBKEY_LENGTH = 50;
+    uint constant public REMCHAIN_PUBKEY_LENGTH = 53;
 
     /*
      *  Storage
