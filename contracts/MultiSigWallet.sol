@@ -17,26 +17,33 @@ contract MultiSigWallet {
     event OwnerAddition(address indexed owner);
     event OwnerRemoval(address indexed owner);
     event RequirementChange(uint required);
-    event SwapAmountChange(uint min_swap_amount);
-    event SwapRequest( address sender,
-                       bytes32 chainId,
+    event MinSwapAmountChange(uint _min_swap_amount);
+    event SwapFeeChange(uint _swap_fee);
+    event SwapRequest( bytes32 chainId,
                        string swapPubkey,
                        uint amountToSwap,
+                       address returnAddress,
                        uint timestamp);
+    event ChainIdAddition(bytes32 _chain_id);
+    event ChainIdRemoval(bytes32 _chain_id);
 
     /*
      *  Constants
      */
     uint constant public MAX_OWNER_COUNT = 50;
-    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0xdDB7456b6d76b6F17080439c98BB8Dad8B5Bae98);  // Remme ERC20 contract address
-    bytes32 constant public REMCHAIN_ID = 0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32;
-    bytes32 constant public ETH_ID =      0x0000000000000000000000000000000000000000000000000000000000000001;
+    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0x29A5DC3252D5aAAe7DF25Cc1C6128f484eb340eD);  // Remme ERC20 contract address
+    bytes32 constant public ETH_ID = 0x3;
     uint constant public REMCHAIN_PUBKEY_LENGTH = 53;
 
     /*
      *  Storage
      */
-    uint public min_swap_amount = 200000;  // in REM
+    uint public min_swap_amount = 1200000;  // in REM
+    uint public swap_fee = 200000;
+    bytes32[] public destination_chain_ids = [
+        bytes32(0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32)  // Remprotocol identifier
+    ];
+
     mapping (uint => Transaction) public transactions;
     mapping (bytes32 => uint) public swapTransactions;  // returns transaction number starting from 1
     mapping (uint => mapping (address => bool)) public confirmations;
@@ -109,7 +116,11 @@ contract MultiSigWallet {
     }
 
     modifier validChainId(bytes32 chainId) {
-        require(chainId == REMCHAIN_ID);
+        bool isValidChainId = false;
+        for(uint i = 0; i < destination_chain_ids.length; i++)
+            if(chainId == destination_chain_ids[i])
+                isValidChainId = true;
+        require(isValidChainId);
         _;
     }
 
@@ -216,7 +227,40 @@ contract MultiSigWallet {
         onlyWallet
     {
         min_swap_amount = _min_swap_amount;
-        SwapAmountChange(_min_swap_amount);
+        MinSwapAmountChange(_min_swap_amount);
+    }
+
+    /// @dev Allows to change swap's fee. Transaction has to be sent by wallet.
+    /// @param _swap_fee new swap's fee.
+    function changeSwapFee(uint _swap_fee)
+        public
+        onlyWallet
+    {
+        swap_fee = _swap_fee;
+        SwapFeeChange(_swap_fee);
+    }
+
+    /// @dev Allows to add new chain identifier on which swapped tokens can be sent. Transaction has to be sent by wallet.
+    /// @param _chain_id new chain identifier to add.
+    function addChainId(bytes32 _chain_id)
+        public
+        onlyWallet
+    {
+        destination_chain_ids.push(_chain_id);
+        ChainIdAddition(_chain_id);
+    }
+
+    /// @dev Allows to remove chain identifier. Transaction has to be sent by wallet.
+    /// @param _chain_id chain identifier to remove.
+    function removeChainId(bytes32 _chain_id)
+        public
+        onlyWallet
+    {
+        for(uint i = 0; i < destination_chain_ids.length; i++)
+            if(destination_chain_ids[i] == _chain_id) {
+              delete destination_chain_ids[i];
+              ChainIdRemoval(_chain_id);
+            }
     }
 
     /// @dev Allows a user to request swap from ERC20 REM to Remchain.
@@ -232,7 +276,7 @@ contract MultiSigWallet {
         if (!ERC20_REM_CONTRACT.transferFrom(msg.sender, address(this), amountToSwap)) {
             revert();
         }
-        SwapRequest(msg.sender, chainId, swapPubkey, amountToSwap, now);
+        SwapRequest(chainId, swapPubkey, amountToSwap, msg.sender, now);
     }
 
     /// @dev Allows an owner to submit and confirm a transaction.
