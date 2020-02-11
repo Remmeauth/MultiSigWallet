@@ -17,18 +17,35 @@ contract MultiSigWallet {
     event OwnerAddition(address indexed owner);
     event OwnerRemoval(address indexed owner);
     event RequirementChange(uint required);
-    event SwapRequest(address sender, string chainId, string userPublicKey, uint amountToSwap, uint timestamp);
+    event MinSwapAmountChange(uint _min_swap_amount);
+    event SwapFeeChange(uint _swap_fee);
+    event SwapRequest( bytes32 chainId,
+                       string swapPubkey,
+                       uint amountToSwap,
+                       address returnAddress,
+                       uint timestamp);
+    event ChainIdAddition(bytes32 _chain_id);
+    event ChainIdRemoval(bytes32 _chain_id);
 
     /*
      *  Constants
      */
     uint constant public MAX_OWNER_COUNT = 50;
-    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0x83984d6142934bb535793A82ADB0a46EF0F66B6d);  // Remme ERC20 contract address
+    ERC20 constant internal ERC20_REM_CONTRACT = ERC20(0x29A5DC3252D5aAAe7DF25Cc1C6128f484eb340eD);  // Remme ERC20 contract address
+    bytes32 constant public ETH_ID = 0x3;
+    uint constant public REMCHAIN_PUBKEY_LENGTH = 53;
 
     /*
      *  Storage
      */
+    uint public min_swap_amount = 1200000;  // in REM
+    uint public swap_fee = 200000;
+    bytes32[] public destination_chain_ids = [
+        bytes32(0x1c6ae7719a2a3b4ecb19584a30ff510ba1b6ded86e1fd8b8fc22f1179c622a32)  // Remprotocol identifier
+    ];
+
     mapping (uint => Transaction) public transactions;
+    mapping (bytes32 => uint) public swapTransactions;  // returns transaction number starting from 1
     mapping (uint => mapping (address => bool)) public confirmations;
     mapping (address => bool) public isOwner;
     address[] public owners;
@@ -40,7 +57,6 @@ contract MultiSigWallet {
         uint value;
         bytes data;
         bool executed;
-        bytes32 swapId;
     }
 
     /*
@@ -93,6 +109,26 @@ contract MultiSigWallet {
             && ownerCount != 0);
         _;
     }
+
+    modifier validAmountToSwap(uint amountToSwap) {
+        require(amountToSwap >= min_swap_amount);
+        _;
+    }
+
+    modifier validChainId(bytes32 chainId) {
+        bool isValidChainId = false;
+        for(uint i = 0; i < destination_chain_ids.length; i++)
+            if(chainId == destination_chain_ids[i])
+                isValidChainId = true;
+        require(isValidChainId);
+        _;
+    }
+
+    modifier validPubkey(string pubkey) {
+        require(bytes(pubkey).length == REMCHAIN_PUBKEY_LENGTH);
+        _;
+    }
+
 
     /// @dev Fallback function allows to deposit ether.
     function()
@@ -184,17 +220,63 @@ contract MultiSigWallet {
         RequirementChange(_required);
     }
 
+    /// @dev Allows to change minimum swap amount. Transaction has to be sent by wallet.
+    /// @param _min_swap_amount minimum amount to swap.
+    function changeMinimumSwapAmount(uint _min_swap_amount)
+        public
+        onlyWallet
+    {
+        min_swap_amount = _min_swap_amount;
+        MinSwapAmountChange(_min_swap_amount);
+    }
+
+    /// @dev Allows to change swap's fee. Transaction has to be sent by wallet.
+    /// @param _swap_fee new swap's fee.
+    function changeSwapFee(uint _swap_fee)
+        public
+        onlyWallet
+    {
+        swap_fee = _swap_fee;
+        SwapFeeChange(_swap_fee);
+    }
+
+    /// @dev Allows to add new chain identifier on which swapped tokens can be sent. Transaction has to be sent by wallet.
+    /// @param _chain_id new chain identifier to add.
+    function addChainId(bytes32 _chain_id)
+        public
+        onlyWallet
+    {
+        destination_chain_ids.push(_chain_id);
+        ChainIdAddition(_chain_id);
+    }
+
+    /// @dev Allows to remove chain identifier. Transaction has to be sent by wallet.
+    /// @param _chain_id chain identifier to remove.
+    function removeChainId(bytes32 _chain_id)
+        public
+        onlyWallet
+    {
+        for(uint i = 0; i < destination_chain_ids.length; i++)
+            if(destination_chain_ids[i] == _chain_id) {
+              delete destination_chain_ids[i];
+              ChainIdRemoval(_chain_id);
+            }
+    }
+
     /// @dev Allows a user to request swap from ERC20 REM to Remchain.
     /// @param chainId Destination blockchain identifier on which swapped tokens should be  sent.
-    /// @param userPublicKey Public key which is used to validate signature for claiming account name on Remchain.
+    /// @param swapPubkey Public key which is used to validate signature for claiming account name on Remchain.
     /// @param amountToSwap Amount of tokens to swap from ERC20 REM to Remchain.
-    function requestSwap(string chainId, string userPublicKey, uint amountToSwap)
+    function requestSwap(bytes32 chainId, string swapPubkey, uint amountToSwap)
         public
+        validAmountToSwap(amountToSwap)
+        validChainId(chainId)
+        validPubkey(swapPubkey)
     {
         if (!ERC20_REM_CONTRACT.transferFrom(msg.sender, address(this), amountToSwap)) {
             revert();
         }
-        SwapRequest(msg.sender, chainId, userPublicKey, amountToSwap, now);
+        SwapRequest(chainId, swapPubkey, amountToSwap, msg.sender, now);
     }
 
     /// @dev Allows an owner to submit and confirm a transaction.
@@ -220,21 +302,13 @@ contract MultiSigWallet {
         public
         returns (uint transactionId)
     {
-        bytes32 swapId = sha256("eth", "*", destination, "*", value, "*", nonce, "*", data);
-        transactionId = 0;
-        for (uint i=transactionCount-1; i>=0; i--) {
-            if (transactions[i].executed)
-                break;
-            if (transactions[i].swapId == swapId) {
-                transactionId = i;
-                break;
-            }
-        }
-        if (transactionId == 0 || transactionCount == 0) {
+        bytes32 swapId = keccak256(ETH_ID, "*", destination, "*", value, "*", nonce, "*", data);
+        transactionId = swapTransactions[swapId];
+        if ( transactionId == 0 ) {
             transactionId = addTransaction(destination, value, data);
-            transactions[transactionId].swapId = swapId;
+            swapTransactions[swapId] = transactionId+1;
         }
-        confirmTransaction(transactionId);
+        confirmTransaction(swapTransactions[swapId]-1);
     }
 
     /// @dev Allows an owner to confirm a transaction.
@@ -339,8 +413,7 @@ contract MultiSigWallet {
             destination: destination,
             value: value,
             data: data,
-            executed: false,
-            swapId: bytes32(0)
+            executed: false
         });
         transactionCount += 1;
         Submission(transactionId);
